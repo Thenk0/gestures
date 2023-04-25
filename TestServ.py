@@ -21,7 +21,10 @@ from config import (
     BLACK,
     WHITE,
     PHONE,
-    IMAGE_PATH
+    IMAGE_PATH,
+    IMAGE_PATH2,
+    IMAGE_PATH3,
+    IMAGE_PATH4
 )
 from cv2 import (
     waitKey,
@@ -53,6 +56,7 @@ from cv2 import (
     addWeighted,
 )
 
+import datetime
 class Camera:
     __slots__ = ["cap_width","cap_height","cap","img","green","frame","hsv","lower_green","upper_green","mask","f","l_h","l_s","l_v","u_h","u_s","u_v","state","width","height"]
     
@@ -80,6 +84,9 @@ class GreenScreen:
     def __init__(self):
         self.state = 0
         self.img = resize(imread(IMAGE_PATH),(WIDTH,HEIGHT))
+        self.img2 = resize(imread(IMAGE_PATH2),(WIDTH,HEIGHT))
+        self.img3 = resize(imread(IMAGE_PATH3),(WIDTH,HEIGHT))
+        self.img4 = resize(imread(IMAGE_PATH4),(WIDTH,HEIGHT))
 
     def nothing(self, one):
         pass
@@ -97,7 +104,15 @@ class GreenScreen:
         return cvtColor(self.mask,COLOR_GRAY2BGR)
     
     def find_where_pixels_is_equal_to_mask(self):
-        return where(self.mask,self.img,self.f)
+        self.timer = datetime.datetime.now().time().second
+        if self.timer <= 15:
+            return where(self.mask,self.img,self.f)
+        elif self.timer >= 15 and self.timer <= 30:
+            return where(self.mask,self.img2,self.f)
+        elif self.timer >= 30 and self.timer <= 45:
+            return where(self.mask,self.img3,self.f)
+        elif self.timer >= 45 and self.timer <= 60:
+            return where(self.mask,self.img4,self.f)
     
     def trackbar(self):
         namedWindow("Trackbars")

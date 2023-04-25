@@ -5,3 +5,6 @@ BLACK = (0,0,0)
 WHITE = (255,255,255)
 PHONE = "http://192.168.31.107:8080/video" # IP camera address
 IMAGE_PATH = "./images/classroom.png"
+IMAGE_PATH2 = "./images/classroom2.jpg"
+IMAGE_PATH3 = "./images/classroom3.jpg"
+IMAGE_PATH4 = "./images/classroom4.jpg"
