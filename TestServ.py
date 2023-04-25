@@ -1,62 +1,64 @@
 import csv
 import argparse
 import itertools
-
-from utils import CvFpsCalc
-from model import KeyPointClassifier
-
-
 from mss import mss
+from mouse import move
+from copy import deepcopy
+from keyboard import send
+from utils import CvFpsCalc
 import pynput.keyboard as kb
 from mediapipe import solutions
-from keyboard import is_pressed,send,press
 from flask.wrappers import Response
-from mouse import move, get_position
+from model import KeyPointClassifier
 from flask import Flask, render_template
 from pynput.mouse import Controller, Button
-from numpy import asarray, where, array, float32, argmax,empty,append
-from copy import deepcopy
+from numpy import asarray, where, array,empty,append
+from config import (
+    WIDTH,
+    HEIGHT,
+    VERTICAL_FLIP,
+    COUNT_OF_FINGER_POINT,
+    BLACK,
+    WHITE,
+    PHONE
+)
 from cv2 import (
-    boundingRect,
-    putText,
-    FONT_HERSHEY_SIMPLEX,
-    LINE_AA,
-    INTER_AREA,
-    rectangle,
-    inRange,
-    line,
-    resize,
+    waitKey,
     VideoCapture,
+    resizeWindow,
+    resize,
+    rectangle,
+    putText,
+    namedWindow,
+    line,
+    LINE_AA,
+    inRange,
+    imread,
+    imencode,
+    getTrackbarPos,
+    FONT_HERSHEY_SIMPLEX,
     flip,
     cvtColor,
-    COLOR_BGR2RGB,
-    addWeighted,
-    imencode,
-    bitwise_and,
-    FILLED,
-    circle,
-    COLOR_RGB2BGR,
-    COLOR_BGR2HSV,
-    COLOR_GRAY2BGR,
-    getTrackbarPos,
-    namedWindow,
-    resizeWindow,
     createTrackbar,
-    imread,
-    waitKey,
-    destroyAllWindows,
+    COLOR_RGB2BGR,
+    COLOR_GRAY2BGR,
+    COLOR_BGR2RGB,
+    COLOR_BGR2HSV,
+    circle,
     CAP_PROP_FRAME_WIDTH,
     CAP_PROP_FRAME_HEIGHT,
-    imshow
+    boundingRect,
+    bitwise_and,
+    addWeighted,
 )
 
 class Camera:
     __slots__ = ["cap_width","cap_height","cap","img","green","frame","hsv","lower_green","upper_green","mask","f","l_h","l_s","l_v","u_h","u_s","u_v","state","width","height"]
     
     def __init__(self):
-        self.cap_width, self.cap_height = 1280, 720
+        self.cap_width, self.cap_height = WIDTH, HEIGHT
         self.cap = VideoCapture(-1)
-        # http://192.168.31.107:8080/video
+        # PHONE
         self.cap.set(CAP_PROP_FRAME_WIDTH, self.cap_width)
         self.cap.set(CAP_PROP_FRAME_HEIGHT,self.cap_height)
 
@@ -64,20 +66,72 @@ class Camera:
         _, self.frame = self.cap.read()
         return self.frame
     
-    def convert_frame_to_array(self):
-        return asarray(self.frame)
-    
-    def resize_frame(self):
-        return resize(self.frame,(self.cap_width, self.cap_height))
-
     def flip(self):
-        return flip(self.frame,-1)
+        return flip(self.frame,VERTICAL_FLIP)
     
     def run(self):
         self.frame = self.capture_camera()
-        self.frame = self.convert_frame_to_array()
-        self.frame = self.resize_frame()
         self.frame = self.flip()
+        return self.frame
+
+
+class GreenScreen:
+    def __init__(self) -> None:
+        self.state = 0
+        self.img = resize(imread("./hell.png"),(WIDTH,HEIGHT))
+
+    def nothing(self, one):
+        pass
+
+    def cvt_to_hsv(self):
+        return cvtColor(self.frame,COLOR_BGR2HSV)
+    
+    def find_range(self):
+        return inRange(self.hsv,self.lower_green,self.upper_green)
+    
+    def bitwise(self):
+        return bitwise_and(self.frame,self.frame,mask=self.mask)
+    
+    def cvt_to_bgr(self):
+        return cvtColor(self.mask,COLOR_GRAY2BGR)
+    
+    def find_where_pixels_is_equal_to_mask(self):
+        return where(self.mask,self.img,self.f)
+    
+    def trackbar(self):
+        namedWindow("Trackbars")
+        resizeWindow("Trackbars", 1000, 1000)
+        createTrackbar("L-H", "Trackbars", 45, 179, self.nothing)
+        createTrackbar("L-S", "Trackbars", 25, 255, self.nothing)
+        createTrackbar("L-V", "Trackbars", 61, 255, self.nothing)
+        createTrackbar("U-H", "Trackbars", 91, 179, self.nothing)
+        createTrackbar("U-S", "Trackbars", 255, 255, self.nothing)
+        createTrackbar("U-V", "Trackbars", 255, 255, self.nothing)
+        self.state = 1
+
+    def values(self):
+        self.l_h = getTrackbarPos("L-H", "Trackbars")
+        self.l_s = getTrackbarPos("L-S", "Trackbars")
+        self.l_v = getTrackbarPos("L-V", "Trackbars")
+        self.u_h = getTrackbarPos("U-H", "Trackbars")
+        self.u_s = getTrackbarPos("U-S", "Trackbars")
+        self.u_v = getTrackbarPos("U-V", "Trackbars")
+        return self.l_h,self.l_s,self.l_v,self.u_h,self.u_s,self.u_v
+
+    def run(self, frame):
+        self.frame = frame
+        if self.state == 0:
+            self.trackbar()
+        self.l_h,self.l_s,self.l_v,self.u_h,self.u_s,self.u_v = self.values()
+        self.lower_green = array([self.l_h, self.l_s, self.l_v])
+        self.upper_green = array([self.u_h, self.u_s, self.u_v])
+        self.hsv = self.cvt_to_hsv()
+        self.mask = self.find_range()
+        self.f = self.frame - self.bitwise()
+        self.mask = self.cvt_to_bgr()
+        self.frame = self.find_where_pixels_is_equal_to_mask()
+        if waitKey(1) & 0xFF == ord('q'):
+            pass
         return self.frame
 
 
@@ -171,70 +225,72 @@ class Gesture:
                     handedness,
                     self.keypoint_classifier_labels[hand_sign_id],
                 )
-                if handedness.classification[0].label[0:] == "Left" and self.state == 0:
-                    match self.keypoint_classifier_labels[hand_sign_id]:
-                        case "FirstGroup":
-                            send("q")
-                            print("q")
-                            self.state = 1
-                        case "SecondGroup":
-                            send("w")
-                            print("w")
-                            self.state = 1
-                        case "ThirdGroup":
-                            send("e")
-                            print("e")
-                            self.state = 1
-                        case "FirstLetter":
-                            send("z")
-                            print("z")
-                            self.state = 1
-                        case "SecondLetter":
-                            send("x")
-                            print("x")
-                            self.state = 1
-                        case "ThirdLetter":
-                            send("c")
-                            print("c")
-                            self.state = 1
-                        case "Click":
-                            self.mouse.click(Button.left)
-                        case "RightClick":
-                            self.mouse.click(Button.right)
+                if handedness.classification[0].label[0:] == "Left":
+                    if self.state == 0:
+                        match self.keypoint_classifier_labels[hand_sign_id]:
+                            case "FirstGroup":
+                                send("q")
+                                print("q")
+                                self.state = 1
+                            case "SecondGroup":
+                                send("w")
+                                print("w")
+                                self.state = 1
+                            case "ThirdGroup":
+                                send("e")
+                                print("e")
+                                self.state = 1
+                            case "FirstLetter":
+                                send("z")
+                                print("z")
+                                self.state = 1
+                            case "SecondLetter":
+                                send("x")
+                                print("x")
+                                self.state = 1
+                            case "ThirdLetter":
+                                send("c")
+                                print("c")
+                                self.state = 1
+                            case "Click":
+                                self.mouse.click(Button.left)
+                            case "RightClick":
+                                self.mouse.click(Button.right)
                     if self.keypoint_classifier_labels[hand_sign_id] == "CloseNothing":
                         self.state = 0
                 else:
-                    match self.keypoint_classifier_labels[hand_sign_id]:
-                        case "FirstGroup":
-                            send("r")
-                            print("r")
-                            self.state2 = 1
-                        case "SecondGroup":
-                            send("t")
-                            print("t")
-                            self.state2 = 1
-                        case "ThirdGroup":
-                            send("y")
-                            print("y")
-                            self.state2 = 1
-                        case "FirstLetter":
-                            send("v")
-                            print("v")
-                            self.state2 = 1
-                        case "SecondLetter":
-                            send("b")
-                            print("b")
-                            self.state2 = 1
-                        case "ThirdLetter":
-                            send("n")
-                            print("n")
-                            self.state2 = 1
-                        case "Click":
-                            self.mouse.click(Button.left)
-                            self.state2 = 1
-                        case "RightClick":
-                            self.mouse.click(Button.right)
-                            self.state2 = 1
+                    if self.state2 == 0:
+                        match self.keypoint_classifier_labels[hand_sign_id]:
+                            case "FirstGroup":
+                                send("r")
+                                print("r")
+                                self.state2 = 1
+                            case "SecondGroup":
+                                send("t")
+                                print("t")
+                                self.state2 = 1
+                            case "ThirdGroup":
+                                send("y")
+                                print("y")
+                                self.state2 = 1
+                            case "FirstLetter":
+                                send("v")
+                                print("v")
+                                self.state2 = 1
+                            case "SecondLetter":
+                                send("b")
+                                print("b")
+                                self.state2 = 1
+                            case "ThirdLetter":
+                                send("n")
+                                print("n")
+                                self.state2 = 1
+                            case "Click":
+                                self.mouse.click(Button.left)
+                                self.state2 = 1
+                            case "RightClick":
+                                self.mouse.click(Button.right)
+                                self.state2 = 1
                     if self.keypoint_classifier_labels[hand_sign_id] == "CloseNothing":
                         self.state2 = 0
             
@@ -283,14 +339,15 @@ class Gesture:
             landmark_x = min(int(landmark.x * image_width), image_width - 1)
             landmark_y = min(int(landmark.y * image_height), image_height - 1)
             # landmark_z = landmark.z
+
             # Mouse
-            landmark_x2 = min(int(landmark.x * 1920), 1920 - 1)
-            landmark_y2 = min(int(landmark.y * 1080), 1080- 1)
+            landmark_x2 = min(int(landmark.x * WIDTH), WIDTH - 1)
+            landmark_y2 = min(int(landmark.y * HEIGHT), HEIGHT - 1)
 
             landmark_point.append([landmark_x, landmark_y])
             landmark_point_x.append(landmark_x2)
             landmark_point_y.append(landmark_y2)
-        move(sum(landmark_point_x)/21,sum(landmark_point_y)/21)
+        move(sum(landmark_point_x)/COUNT_OF_FINGER_POINT,sum(landmark_point_y)/COUNT_OF_FINGER_POINT)
         return landmark_point
 
 
@@ -334,184 +391,184 @@ class Gesture:
         if len(landmark_point) > 0:
             # Thumb
             line(image, tuple(landmark_point[2]), tuple(landmark_point[3]),
-         (0, 0, 0), 6)
+         BLACK, 6)
             line(image, tuple(landmark_point[2]), tuple(landmark_point[3]),
-         (255, 255, 255), 2)
+         WHITE, 2)
             line(image, tuple(landmark_point[3]), tuple(landmark_point[4]),
-         (0, 0, 0), 6)
+         BLACK, 6)
             line(image, tuple(landmark_point[3]), tuple(landmark_point[4]),
-                    (255, 255, 255), 2)
+                    WHITE, 2)
 
             # Index finger
             line(image, tuple(landmark_point[5]), tuple(landmark_point[6]),
-         (0, 0, 0), 6)
+         BLACK, 6)
             line(image, tuple(landmark_point[5]), tuple(landmark_point[6]),
-         (255, 255, 255), 2)
+         WHITE, 2)
             line(image, tuple(landmark_point[6]), tuple(landmark_point[7]),
-         (0, 0, 0), 6)
+         BLACK, 6)
             line(image, tuple(landmark_point[6]), tuple(landmark_point[7]),
-         (255, 255, 255), 2)
+         WHITE, 2)
             line(image, tuple(landmark_point[7]), tuple(landmark_point[8]),
-         (0, 0, 0), 6)
+         BLACK, 6)
             line(image, tuple(landmark_point[7]), tuple(landmark_point[8]),
-         (255, 255, 255),6) 
+         WHITE,6) 
             # Middle finger
             line(image, tuple(landmark_point[9]), tuple(landmark_point[10]),
-         (0, 0, 0), 6)
+         BLACK, 6)
             line(image, tuple(landmark_point[9]), tuple(landmark_point[10]),
-         (255, 255, 255), 2)
+         WHITE, 2)
             line(image, tuple(landmark_point[10]), tuple(landmark_point[11]),
-         (0, 0, 0), 6)
+         BLACK, 6)
             line(image, tuple(landmark_point[10]), tuple(landmark_point[11]),
-         (255, 255, 255), 2)
+         WHITE, 2)
             line(image, tuple(landmark_point[11]), tuple(landmark_point[12]),
-         (0, 0, 0), 6)
+         BLACK, 6)
             line(image, tuple(landmark_point[11]), tuple(landmark_point[12]),
-         (255, 255, 255),6) 
+         WHITE,6) 
             # Ring finger
             line(image, tuple(landmark_point[13]), tuple(landmark_point[14]),
-         (0, 0, 0), 6)
+         BLACK, 6)
             line(image, tuple(landmark_point[13]), tuple(landmark_point[14]),
-         (255, 255, 255), 2)
+         WHITE, 2)
             line(image, tuple(landmark_point[14]), tuple(landmark_point[15]),
-         (0, 0, 0), 6)
+         BLACK, 6)
             line(image, tuple(landmark_point[14]), tuple(landmark_point[15]),
-         (255, 255, 255), 2)
+         WHITE, 2)
             line(image, tuple(landmark_point[15]), tuple(landmark_point[16]),
-         (0, 0, 0), 6)
+         BLACK, 6)
             line(image, tuple(landmark_point[15]), tuple(landmark_point[16]),
-         (255, 255, 255), 2)
+         WHITE, 2)
 
             # Little finger
             line(image, tuple(landmark_point[17]), tuple(landmark_point[18]),
-         (0, 0, 0), 6)
+         BLACK, 6)
             line(image, tuple(landmark_point[17]), tuple(landmark_point[18]),
-         (255, 255, 255), 2)
+         WHITE, 2)
             line(image, tuple(landmark_point[18]), tuple(landmark_point[19]),
-         (0, 0, 0), 6)
+         BLACK, 6)
             line(image, tuple(landmark_point[18]), tuple(landmark_point[19]),
-         (255, 255, 255), 2)
+         WHITE, 2)
             line(image, tuple(landmark_point[19]), tuple(landmark_point[20]),
-         (0, 0, 0), 6)
+         BLACK, 6)
             line(image, tuple(landmark_point[19]), tuple(landmark_point[20]),
-                    (255, 255, 255), 2)
+                    WHITE, 2)
 
             # Palm
             line(image, tuple(landmark_point[0]), tuple(landmark_point[1]),
-         (0, 0, 0), 6)
+         BLACK, 6)
             line(image, tuple(landmark_point[0]), tuple(landmark_point[1]),
-         (255, 255, 255), 2)
+         WHITE, 2)
             line(image, tuple(landmark_point[1]), tuple(landmark_point[2]),
-         (0, 0, 0), 6)
+         BLACK, 6)
             line(image, tuple(landmark_point[1]), tuple(landmark_point[2]),
-         (255, 255, 255), 2)
+         WHITE, 2)
             line(image, tuple(landmark_point[2]), tuple(landmark_point[5]),
-         (0, 0, 0), 6)
+         BLACK, 6)
             line(image, tuple(landmark_point[2]), tuple(landmark_point[5]),
-         (255, 255, 255), 2)
+         WHITE, 2)
             line(image, tuple(landmark_point[5]), tuple(landmark_point[9]),
-         (0, 0, 0), 6)
+         BLACK, 6)
             line(image, tuple(landmark_point[5]), tuple(landmark_point[9]),
-         (255, 255, 255), 2)
+         WHITE, 2)
             line(image, tuple(landmark_point[9]), tuple(landmark_point[13]),
-         (0, 0, 0), 6)
+         BLACK, 6)
             line(image, tuple(landmark_point[9]), tuple(landmark_point[13]),
-         (255, 255, 255), 2)
+         WHITE, 2)
             line(image, tuple(landmark_point[13]), tuple(landmark_point[17]),
-         (0, 0, 0), 6)
+         BLACK, 6)
             line(image, tuple(landmark_point[13]), tuple(landmark_point[17]),
-         (255, 255, 255), 2)
+         WHITE, 2)
             line(image, tuple(landmark_point[17]), tuple(landmark_point[0]),
-         (0, 0, 0), 6)
+         BLACK, 6)
             line(image, tuple(landmark_point[17]), tuple(landmark_point[0]),
-                    (255, 255, 255), 2)
+                    WHITE, 2)
 
         # Key Points
         for index, landmark in enumerate(landmark_point):
-            if index == 0:  # 手首1
-                circle(image, (landmark[0], landmark[1]), 5, (255, 255, 255),
+            if index == 0:  
+                circle(image, (landmark[0], landmark[1]), 5, WHITE,
                         -1)
-                circle(image, (landmark[0], landmark[1]), 5, (0, 0, 0), 1)
-            if index == 1:  # 手首2
-                circle(image, (landmark[0], landmark[1]), 5, (255, 255, 255),
+                circle(image, (landmark[0], landmark[1]), 5, BLACK, 1)
+            if index == 1:  
+                circle(image, (landmark[0], landmark[1]), 5, WHITE,
                         -1)
-                circle(image, (landmark[0], landmark[1]), 5, (0, 0, 0), 1)
-            if index == 2:  # 親指：付け根
-                circle(image, (landmark[0], landmark[1]), 5, (255, 255, 255),
+                circle(image, (landmark[0], landmark[1]), 5, BLACK, 1)
+            if index == 2:  
+                circle(image, (landmark[0], landmark[1]), 5, WHITE,
                         -1)
-                circle(image, (landmark[0], landmark[1]), 5, (0, 0, 0), 1)
-            if index == 3:  # 親指：第1関節
-                circle(image, (landmark[0], landmark[1]), 5, (255, 255, 255),
+                circle(image, (landmark[0], landmark[1]), 5, BLACK, 1)
+            if index == 3:  
+                circle(image, (landmark[0], landmark[1]), 5, WHITE,
                         -1)
-                circle(image, (landmark[0], landmark[1]), 5, (0, 0, 0), 1)
-            if index == 4:  # 親指：指先
-                circle(image, (landmark[0], landmark[1]), 8, (255, 255, 255),
+                circle(image, (landmark[0], landmark[1]), 5, BLACK, 1)
+            if index == 4:  
+                circle(image, (landmark[0], landmark[1]), 8, WHITE,
                         -1)
-                circle(image, (landmark[0], landmark[1]), 8, (0, 0, 0), 1)
-            if index == 5:  # 人差指：付け根
-                circle(image, (landmark[0], landmark[1]), 5, (255, 255, 255),
+                circle(image, (landmark[0], landmark[1]), 8, BLACK, 1)
+            if index == 5:  
+                circle(image, (landmark[0], landmark[1]), 5, WHITE,
                         -1)
-                circle(image, (landmark[0], landmark[1]), 5, (0, 0, 0), 1)
-            if index == 6:  # 人差指：第2関節
-                circle(image, (landmark[0], landmark[1]), 5, (255, 255, 255),
+                circle(image, (landmark[0], landmark[1]), 5, BLACK, 1)
+            if index == 6:  
+                circle(image, (landmark[0], landmark[1]), 5, WHITE,
                         -1)
-                circle(image, (landmark[0], landmark[1]), 5, (0, 0, 0), 1)
-            if index == 7:  # 人差指：第1関節
-                circle(image, (landmark[0], landmark[1]), 5, (255, 255, 255),
+                circle(image, (landmark[0], landmark[1]), 5, BLACK, 1)
+            if index == 7:  
+                circle(image, (landmark[0], landmark[1]), 5, WHITE,
                         -1)
-                circle(image, (landmark[0], landmark[1]), 5, (0, 0, 0), 1)
-            if index == 8:  # 人差指：指先
-                circle(image, (landmark[0], landmark[1]), 8, (255, 255, 255),
+                circle(image, (landmark[0], landmark[1]), 5, BLACK, 1)
+            if index == 8:  
+                circle(image, (landmark[0], landmark[1]), 8, WHITE,
                         -1)
-                circle(image, (landmark[0], landmark[1]), 8, (0, 0, 0), 1)
-            if index == 9:  # 中指：付け根
-                circle(image, (landmark[0], landmark[1]), 5, (255, 255, 255),
+                circle(image, (landmark[0], landmark[1]), 8, BLACK, 1)
+            if index == 9:  
+                circle(image, (landmark[0], landmark[1]), 5, WHITE,
                         -1)
-                circle(image, (landmark[0], landmark[1]), 5, (0, 0, 0), 1)
-            if index == 10:  # 中指：第2関節
-                circle(image, (landmark[0], landmark[1]), 5, (255, 255, 255),
+                circle(image, (landmark[0], landmark[1]), 5, BLACK, 1)
+            if index == 10:  
+                circle(image, (landmark[0], landmark[1]), 5, WHITE,
                         -1)
-                circle(image, (landmark[0], landmark[1]), 5, (0, 0, 0), 1)
-            if index == 11:  # 中指：第1関節
-                circle(image, (landmark[0], landmark[1]), 5, (255, 255, 255),
+                circle(image, (landmark[0], landmark[1]), 5, BLACK, 1)
+            if index == 11:  
+                circle(image, (landmark[0], landmark[1]), 5, WHITE,
                         -1)
-                circle(image, (landmark[0], landmark[1]), 5, (0, 0, 0), 1)
-            if index == 12:  # 中指：指先
-                circle(image, (landmark[0], landmark[1]), 8, (255, 255, 255),
+                circle(image, (landmark[0], landmark[1]), 5, BLACK, 1)
+            if index == 12:  
+                circle(image, (landmark[0], landmark[1]), 8, WHITE,
                         -1)
-                circle(image, (landmark[0], landmark[1]), 8, (0, 0, 0), 1)
-            if index == 13:  # 薬指：付け根
-                circle(image, (landmark[0], landmark[1]), 5, (255, 255, 255),
+                circle(image, (landmark[0], landmark[1]), 8, BLACK, 1)
+            if index == 13:  
+                circle(image, (landmark[0], landmark[1]), 5, WHITE,
              -1)
-                circle(image, (landmark[0], landmark[1]), 5, (0, 0, 0), 1)
-            if index == 14:  # 薬指：第2関節
-                circle(image, (landmark[0], landmark[1]), 5, (255, 255, 255),
+                circle(image, (landmark[0], landmark[1]), 5, BLACK, 1)
+            if index == 14:  
+                circle(image, (landmark[0], landmark[1]), 5, WHITE,
              -1)
-                circle(image, (landmark[0], landmark[1]), 5, (0, 0, 0), 1)
-            if index == 15:  # 薬指：第1関節
-                circle(image, (landmark[0], landmark[1]), 5, (255, 255, 255),
+                circle(image, (landmark[0], landmark[1]), 5, BLACK, 1)
+            if index == 15:  
+                circle(image, (landmark[0], landmark[1]), 5, WHITE,
              -1)
-                circle(image, (landmark[0], landmark[1]), 5, (0, 0, 0), 1)
-            if index == 16:  # 薬指：指先
-                circle(image, (landmark[0], landmark[1]), 8, (255, 255, 255),
+                circle(image, (landmark[0], landmark[1]), 5, BLACK, 1)
+            if index == 16:  
+                circle(image, (landmark[0], landmark[1]), 8, WHITE,
              -1)
-                circle(image, (landmark[0], landmark[1]), 8, (0, 0, 0), 1)
-            if index == 17:  # 小指：付け根
-                circle(image, (landmark[0], landmark[1]), 5, (255, 255, 255),
+                circle(image, (landmark[0], landmark[1]), 8, BLACK, 1)
+            if index == 17:  
+                circle(image, (landmark[0], landmark[1]), 5, WHITE,
              -1)
-                circle(image, (landmark[0], landmark[1]), 5, (0, 0, 0), 1)
-            if index == 18:  # 小指：第2関節
-                circle(image, (landmark[0], landmark[1]), 5, (255, 255, 255),
+                circle(image, (landmark[0], landmark[1]), 5, BLACK, 1)
+            if index == 18:  
+                circle(image, (landmark[0], landmark[1]), 5, WHITE,
              -1)
-                circle(image, (landmark[0], landmark[1]), 5, (0, 0, 0), 1)
-            if index == 19:  # 小指：第1関節
-                circle(image, (landmark[0], landmark[1]), 5, (255, 255, 255),
+                circle(image, (landmark[0], landmark[1]), 5, BLACK, 1)
+            if index == 19:  
+                circle(image, (landmark[0], landmark[1]), 5, WHITE,
              -1)
-                circle(image, (landmark[0], landmark[1]), 5, (0, 0, 0), 1)
-            if index == 20:  # 小指：指先
-                circle(image, (landmark[0], landmark[1]), 8, (255, 255, 255),
+                circle(image, (landmark[0], landmark[1]), 5, BLACK, 1)
+            if index == 20:  
+                circle(image, (landmark[0], landmark[1]), 8, WHITE,
              -1)
-                circle(image, (landmark[0], landmark[1]), 8, (0, 0, 0), 1)
+                circle(image, (landmark[0], landmark[1]), 8, BLACK, 1)
 
         return image
 
@@ -520,7 +577,7 @@ class Gesture:
         if use_brect:
             # Outer rectangle
             rectangle(image, (brect[0], brect[1]), (brect[2], brect[3]),
-                        (0, 0, 0), 1)
+                        BLACK, 1)
 
         return image
 
@@ -528,31 +585,31 @@ class Gesture:
     def draw_info_text(self,image, brect, handedness, hand_sign_text,
                     ):
         rectangle(image, (brect[0], brect[1]), (brect[2], brect[1] - 22),
-                    (0, 0, 0), -1)
+                    BLACK, -1)
 
         info_text = handedness.classification[0].label[0:]
         if hand_sign_text != "":
             info_text = info_text + ':' + hand_sign_text
         putText(image, info_text, (brect[0] + 5, brect[1] - 4),
-                FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1, LINE_AA)
+                FONT_HERSHEY_SIMPLEX, 0.6, WHITE, 1, LINE_AA)
 
         return image
 
 
     def draw_info(self,image, fps, mode, number):
         putText(image, "FPS:" + str(fps), (10, 30), FONT_HERSHEY_SIMPLEX,
-                1.0, (0, 0, 0), 4, LINE_AA)
+                1.0, BLACK, 4, LINE_AA)
         putText(image, "FPS:" + str(fps), (10, 30), FONT_HERSHEY_SIMPLEX,
-                1.0, (255, 255, 255), 2, LINE_AA)
+                1.0, WHITE, 2, LINE_AA)
 
         mode_string = ['Logging Key Point', 'Logging Point History']
         if 1 <= mode <= 2:
             putText(image, "MODE:" + mode_string[mode - 1], (10, 90),
-                    FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1,
+                    FONT_HERSHEY_SIMPLEX, 0.6, WHITE, 1,
                     LINE_AA)
             if 0 <= number <= 9:
                 putText(image, "NUM:" + str(number), (10, 110),
-                        FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1,
+                        FONT_HERSHEY_SIMPLEX, 0.6, WHITE, 1,
                         LINE_AA)
         return image
 
@@ -561,13 +618,11 @@ class Screen:
     __slots__ = ["width_for_capture", "height_for_capture", "bounding","width_for_all_cameras","height_for_all_cameras","frame"]
 
     def __init__(self):
-        self.width_for_capture, self.height_for_capture = 1280, 720
-        self.width_for_all_cameras, self.height_for_all_cameras = 1280, 720
         self.bounding = {
             "top": 0,
             "left": 0,
-            "width": self.width_for_capture,
-            "height": self.height_for_capture,
+            "width": WIDTH,
+            "height": HEIGHT,
         }
 
     def capture_screen(self):
@@ -576,34 +631,35 @@ class Screen:
     def convert_frame_to_array(self):
         return asarray(self.frame)
     
-    def resize_frame(self):
-        return resize(self.frame,(self.width_for_all_cameras, self.height_for_all_cameras))
-
     def run(self):
         self.frame = self.capture_screen()
         self.frame = self.convert_frame_to_array()
-        self.frame = self.resize_frame()
         return self.frame
 
 
 class Merge:
-    __slots__ = ["hands", "news", "imgs", "imgs1", "news1", "news2"]
+    __slots__ = ["frame","hands", "news", "imgs", "imgs1", "news1", "news2"]
 
     def convert_to_array(self) -> tuple:
         return asarray(self.news), asarray(self.imgs)
     
     def convert_color(self):
         return cvtColor(self.news, COLOR_RGB2BGR)
+    
+    def convert_color2(self):
+        return cvtColor(self.news, COLOR_BGR2RGB)
 
     def merge(self): 
-        return addWeighted(self.news, 1, self.imgs, 0.8, 1)
-
+        return addWeighted(self.news, 0.5, self.imgs, 1, 0)
+    
     def run(self, imgs, news) -> tuple:
         self.imgs = imgs
         self.news = news
         self.news, self.imgs = self.convert_to_array()
         self.news = self.convert_color()
-        return self.merge()
+        self.news = self.convert_color2()
+        self.frame = self.merge()
+        return self.frame
 
 
 class Starter:
@@ -612,14 +668,16 @@ class Starter:
         self.screen = Screen()
         self.merge = Merge()
         self.gesture = Gesture()
+        self.greenscreen = GreenScreen()
     
     def run(self):
         while 1:
             camera = self.camera.run()
             camera = self.gesture.run(camera)
+            camera = self.greenscreen.run(camera)
             screen = self.screen.run()
             merge = self.merge.run(camera,screen)
-            return camera
+            return merge
 
 
 starter = Starter()
