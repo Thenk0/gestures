@@ -4,3 +4,4 @@ COUNT_OF_FINGER_POINT = 21
 BLACK = (0,0,0)
 WHITE = (255,255,255)
 PHONE = "http://192.168.31.107:8080/video" # IP camera address
+IMAGE_PATH = "./images/classroom.png"

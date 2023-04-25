@@ -20,7 +20,8 @@ from config import (
     COUNT_OF_FINGER_POINT,
     BLACK,
     WHITE,
-    PHONE
+    PHONE,
+    IMAGE_PATH
 )
 from cv2 import (
     waitKey,
@@ -76,9 +77,9 @@ class Camera:
 
 
 class GreenScreen:
-    def __init__(self) -> None:
+    def __init__(self):
         self.state = 0
-        self.img = resize(imread("./hell.png"),(WIDTH,HEIGHT))
+        self.img = resize(imread(IMAGE_PATH),(WIDTH,HEIGHT))
 
     def nothing(self, one):
         pass
