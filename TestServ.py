@@ -57,6 +57,8 @@ from cv2 import (
 )
 
 import datetime
+
+
 class Camera:
     __slots__ = ["cap_width","cap_height","cap","img","green","frame","hsv","lower_green","upper_green","mask","f","l_h","l_s","l_v","u_h","u_s","u_v","state","width","height"]
     
@@ -164,7 +166,7 @@ class Gesture:
         mp_hands = solutions.hands
         self.hands = mp_hands.Hands(
             static_image_mode=use_static_image_mode,
-            max_num_hands=2,
+            max_num_hands=1,
             min_detection_confidence=min_detection_confidence,
             min_tracking_confidence=min_tracking_confidence,
         )
@@ -241,7 +243,7 @@ class Gesture:
                     handedness,
                     self.keypoint_classifier_labels[hand_sign_id],
                 )
-                if handedness.classification[0].label[0:] == "Left":
+                if handedness.classification[0].label[0:] == "Right":
                     if self.state == 0:
                         match self.keypoint_classifier_labels[hand_sign_id]:
                             case "FirstGroup":
@@ -316,7 +318,7 @@ class Gesture:
 
 
     def select_mode(self,key, mode):
-        number = 8
+        number = 6
         if 48 <= key <= 57:  # 0 ~ 9
             number = key - 48
         if key == 110:  # n
@@ -690,10 +692,10 @@ class Starter:
         while 1:
             camera = self.camera.run()
             camera = self.gesture.run(camera)
-            camera = self.greenscreen.run(camera)
+            greenscreen = self.greenscreen.run(camera)
             screen = self.screen.run()
-            merge = self.merge.run(camera,screen)
-            return merge
+            merge = self.merge.run(greenscreen,screen)
+            return camera
 
 
 starter = Starter()
