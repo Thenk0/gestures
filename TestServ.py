@@ -203,7 +203,6 @@ class Gesture:
 
         return args
 
-
     def run(self, image):
         self.mode = 0
         fps = self.cvFpsCalc.get()
@@ -272,8 +271,10 @@ class Gesture:
                                 self.state = 1
                             case "Click":
                                 self.mouse.click(Button.left)
+                                self.state = 1
                             case "RightClick":
                                 self.mouse.click(Button.right)
+                                self.state = 1
                     if self.keypoint_classifier_labels[hand_sign_id] == "CloseNothing":
                         self.state = 0
                 else:
