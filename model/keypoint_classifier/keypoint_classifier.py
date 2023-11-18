@@ -8,7 +8,7 @@ class KeyPointClassifier(object):
     def __init__(
         self,
         model_path='model/keypoint_classifier/keypoint_classifier.tflite',
-        num_threads=1,
+        num_threads=4,
     ):
         self.interpreter = tf.lite.Interpreter(model_path=model_path,
                                                num_threads=num_threads)
@@ -21,6 +21,7 @@ class KeyPointClassifier(object):
         self,
         landmark_list,
     ):
+    
         input_details_tensor_index = self.input_details[0]['index']
         self.interpreter.set_tensor(
             input_details_tensor_index,

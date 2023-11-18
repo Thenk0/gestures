@@ -1,46 +1,88 @@
-from copy import deepcopy
-from cv2 import imencode
-from Project import camera, gesture, greenscreen, merge, screen
+from cv2 import putText, FONT_HERSHEY_SIMPLEX, LINE_AA
+from config import PHONE, CAMERA, SCREEN
+from project import camera, gesturesNew
 import threading
+from utils import CvFpsCalc
+import time
+from turbojpeg import TurboJPEG
+from config import TARGET_FPS
+import cv2
 
-class Start():
-    __slots__ = ["camera","screen","merge","gesture","greenscreen"]
+class Start:
+    __slots__ = (
+        "camera",
+        "screen",
+        "merge",
+        "gesture",
+        "cvFpsCalc",
+        "fps",
+        "timer",
+    )
 
     def __init__(self):
-        self.camera = camera.Camera()
-        self.screen = screen.Screen()
-        self.merge = merge.Merge()
-        self.gesture = gesture.Gesture()
-        self.greenscreen = greenscreen.GreenScreen()
-    
-    def run(self):
-        while 1:
-            camera = self.camera.run()
-            camera = self.gesture.run(camera)
-            greenscreen = self.greenscreen.run(camera)
-            screen = self.screen.run()
-            merge = self.merge.run(greenscreen,screen)
-            return merge
+        print("initializing")
+        self.camera = camera.Camera(CAMERA, False)
+        self.screen = camera.Camera(SCREEN, True)
+        print("got cameras")
+        self.gesture = gesturesNew.Gestures()
+        print("got gestures")
+        print("finished init")
+        self.cvFpsCalc = CvFpsCalc(buffer_len=64)
+        self.timer = 0
 
+    def run(self):
+        camera = self.camera.run()
+        screen = self.screen.run()
+        screen = self.gesture.run(camera, screen)
+        fps = self.cvFpsCalc.get()
+        putText(
+            screen,
+            "FPS:" + str(fps),
+            (10, 30),
+            FONT_HERSHEY_SIMPLEX,
+            1.0,
+            (255,255,255),
+            4,
+            LINE_AA,
+        )
+        return screen
+
+
+print("starting")
 starter = Start()
+print("started")
+
 outputFrame = None
 lock = threading.Lock()
+result = None
+jpeg = TurboJPEG('./libjpeg-turbo-gcc64/bin/libturbojpeg.dll')
 
 def get_frames():
-    global outputFrame,lock
-    while 1:
+    global outputFrame, lock, result
+    print("starting")
+    delta = 1 / TARGET_FPS
+    last_time = time.time()
+    new_time = time.time()
+    while True:
+        new_time = time.time()
+        if new_time - last_time < delta:
+            continue
+        last_time += delta
         frame = starter.run()
-        with lock:     
-            outputFrame = deepcopy(frame)
+        with lock:
+            outputFrame = frame
+
 
 def generate():
-    global outputFrame, lock
-    while 1:
-        with lock:
-            if outputFrame is None:
-                continue
-            (flag, encodedImage) = imencode(".jpg", outputFrame)
-            if not flag:
-                continue
-        yield(b'--frame\r\n' b'Content-Type: image/jpeg\r\n\r\n' + 
-        	bytearray(encodedImage) + b'\r\n')
+    global outputFrame, lock, result
+    print("generating")
+    delta = 1 / TARGET_FPS
+    while True:
+        # compress image into buffer
+        encodedImage = jpeg.encode(outputFrame, quality=75)
+        result = bytearray()
+        result.extend(b"--frame\r\nContent-Type: image/jpeg\r\n\r\n")
+        result.extend(bytearray(encodedImage))
+        result.extend(b"\r\n")
+        time.sleep(delta)
+        yield (bytes(result))
