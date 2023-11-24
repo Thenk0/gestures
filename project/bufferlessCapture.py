@@ -8,7 +8,8 @@ from config import (
 class BufferlessVideoCapture:
 
   def __init__(self, name, screen):
-    self.cap = cv2.VideoCapture(name)
+    if not screen:
+      self.cap = cv2.VideoCapture(name)
     if screen:
       self.cap = cv2.VideoCapture(name, cv2.CAP_DSHOW)
       self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, WIDTH)

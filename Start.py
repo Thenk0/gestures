@@ -6,7 +6,6 @@ from utils import CvFpsCalc
 import time
 from turbojpeg import TurboJPEG
 from config import TARGET_FPS
-import cv2
 
 class Start:
     __slots__ = (

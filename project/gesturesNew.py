@@ -1,12 +1,13 @@
-import math
 import itertools
+import csv
 from copy import deepcopy
+import math
 from mediapipe import solutions
 from numpy import array
-from .gestureActions import GestureActions
 from model import KeyPointClassifier
 from .bufferlessCapture import BufferlessVideoCapture
 from .gestureNames import GestureNames
+from .gestureActions import GestureActions
 from cv2 import (
     resize,
     cvtColor,
@@ -19,43 +20,34 @@ from cv2 import (
     LINE_AA,
     putText,
     imshow,
-    waitKey,
+    waitKeyEx,
 )
-from config import (
-    FLIP_HANDS,
-)
+from config import FLIP_HANDS, GESTURE_ACCURACY
 
-
-def getProgress(start, current, finish):
-    duration = finish - start
-    progress = finish - current
-    return progress / duration
-
-
-def easeInOutSine(t):
-    return -(math.cos(math.pi * t) - 1) / 2
+csv_path = "./model/keypoint_classifier/keypoint.csv"
 
 
 class Gestures:
-    def __init__(self):
+    def __init__(self, train=False):
         self.hand_recognition = solutions.hands.Hands(
             static_image_mode=False,
             max_num_hands=2,
-            min_detection_confidence=0.7,
+            min_detection_confidence=0.8,
             min_tracking_confidence=0.8,
-            model_complexity=0,
+            model_complexity=1,
         )
-        # in frames
-        self.color_animation_duration = 15
+        self.train_gestures = train
+        self.gesture_train_index = 0
+        self.write_gesture = False
+
+        self.previous_gesture = ""
+        self.gesture_accuracy_count = 0
+        self.do_gesture = True
         self.current_right_color = (255, 255, 255)
         self.current_left_color = (255, 255, 255)
-        self.timer = 0
         self.render_image_size = (0, 0)
         self.gesture_classifier = KeyPointClassifier()
         self.gesture_actions = GestureActions()
-
-    def _get_points_color():
-        pass
 
     def draw_hands(
         self,
@@ -90,13 +82,13 @@ class Gestures:
                 start,
                 end,
                 (bone_lines_color),
-                line_size + 4,
+                line_size + 6,
             )
             line(
                 frame,
                 start,
                 end,
-                (0,0,0),
+                (default_points_color),
                 line_size,
             )
         for point in hand:
@@ -104,6 +96,19 @@ class Gestures:
             circle(frame, (point[0], point[1]), circle_size, default_points_color, -1)
             circle(frame, (point[0], point[1]), circle_size, bone_lines_color, 1)
 
+        return frame
+
+    def draw_training_info(self, frame):
+        putText(
+            frame,
+            f"Training Mode | Gesture Index: {self.gesture_train_index}",
+            (10, 90),
+            FONT_HERSHEY_SIMPLEX,
+            0.6,
+            (255, 255, 255),
+            1,
+            LINE_AA,
+        )
         return frame
 
     def draw_info(self, frame, hand):
@@ -134,7 +139,11 @@ class Gestures:
             (0, 0, 0),
             -1,
         )
-        info_text = f"{hand['label']} : {hand['gesture']}"
+        info_text = (
+            f"{hand['label']} : {hand['gesture']}"
+            if not self.train_gestures
+            else hand["label"]
+        )
         putText(
             frame,
             info_text,
@@ -184,6 +193,19 @@ class Gestures:
         temp_landmark_list = list(map(lambda n: n / max_value, temp_landmark_list))
         return temp_landmark_list
 
+    def _write_training_data(self, gestures, pressed_key) -> None:
+        if pressed_key != ord("w"):
+            return False
+        # remove z from list to calculate bounding rect and gesture id
+        landmark_array = []
+        for landmark in gestures[0]["landmarks"]:
+            landmark_array.append([landmark[0], landmark[1]])
+        landmarks = self.pre_process_landmark(landmark_array)
+        with open(csv_path, "a", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerow([self.gesture_train_index, *landmarks])
+        return True
+
     def recognize_gesture(self, hand_landmarks) -> str:
         landmarks = self.pre_process_landmark(hand_landmarks)
         gesture_id = self.gesture_classifier(landmarks)
@@ -197,19 +219,39 @@ class Gestures:
             self._multi_hand_action(gesture_list)
 
     def _single_hand_action(self, gesture) -> None:
+        gesture_string = gesture["gesture"]
+        method = None
         try:
-            method = GestureNames.gestureActionsSingle[gesture["gesture"]]
-            repeat = method(gesture)
-        except:
-            GestureActions.nothing()
+            method = GestureNames.gestureActionsSingle[gesture_string]
+        except KeyError:
+            method = GestureActions.nothing
+        self._do_gesture(method, gesture_string, gesture)
 
     def _multi_hand_action(self, gestures) -> None:
+        left_gesture = gestures[0] if gestures[0]["label"] == "Left" else gestures[1]
+        right_gesture = gestures[1] if gestures[1]["label"] == "Right" else gestures[0]
+        gesture_string = f"{left_gesture['gesture']}|{right_gesture['gesture']}"
         try:
-            gesture_string = f"{gestures[0]['gesture']}|{gestures[1]['gesture']}"
             method = GestureNames.gestureActionsMultiple[gesture_string]
+        except KeyError:
+            method = GestureActions.nothing
+        self._do_gesture(method, gesture_string, gestures)
+
+    def _do_gesture(self, method, gesture_string, gestures):
+        if gesture_string != self.previous_gesture:
+            self.gesture_accuracy_count = 0
+            self.do_gesture = True
+
+        if gesture_string == self.previous_gesture:
+            self.gesture_accuracy_count += 1
+
+        if self.gesture_accuracy_count > GESTURE_ACCURACY and self.do_gesture:
             repeat = method(gestures)
-        except:
-            GestureActions.nothing()
+            if not repeat:
+                self.gesture_accuracy_count = 0
+                self.do_gesture = False
+
+        self.previous_gesture = gesture_string
 
     def _get_gesture_list(self, hand_gestures) -> list:
         """
@@ -261,6 +303,7 @@ class Gestures:
         ----------------
         Image with drawn hands and info
         """
+
         render_image = image if screen is None else screen
 
         self.render_image_size = (render_image.shape[1], render_image.shape[0])
@@ -272,6 +315,13 @@ class Gestures:
         hand_gestures = self.hand_recognition.process(processed_image)
         del processed_image  # delete image to save memory
 
+        pressed_key = waitKeyEx(1)
+        if self.train_gestures:
+            self.gesture_train_index += 1 if pressed_key == ord("=") else 0
+            self.gesture_train_index -= 1 if pressed_key == ord("-") else 0
+            self.gesture_train_index = max(0, self.gesture_train_index)
+            render_image = self.draw_training_info(render_image)
+
         if hand_gestures.multi_hand_landmarks is None:
             return render_image
 
@@ -280,16 +330,34 @@ class Gestures:
 
         if gesture_count == 0:
             return render_image
+        
+        if gesture_count > 1:
+            gesture_left = gesture_list[0]["landmarks"][9]
+            gesture_right = gesture_list[1]["landmarks"][9]
+
+            dist = math.hypot(
+                gesture_right[0] - gesture_left[0], gesture_right[1] - gesture_left[1]
+            )
+            if dist > 30:
+                gesture_list.pop()
+
         for gesture in gesture_list:
+            gesture_color = (
+                GestureNames.gestureColors[gesture["gesture"]]
+                if not self.train_gestures
+                else (0, 0, 0)
+            )
             render_image = self.draw_hands(
                 render_image,
                 gesture["landmarks"],
-                default_points_color=GestureNames.gestureColors[gesture["gesture"]],
+                default_points_color=gesture_color,
             )
             render_image = self.draw_info(render_image, gesture)
-        self.action(gesture_list, len(gesture_list))
-        self.timer += 1
-
+        if not self.train_gestures:
+            self.action(gesture_list, len(gesture_list))
+            return render_image
+        if self._write_training_data(gesture_list, pressed_key):
+            circle((render_image), (50, 30), 25, (0, 255, 0), -1)
         return render_image
 
     @staticmethod
@@ -302,6 +370,3 @@ class Gestures:
             screen = screenCap.read()
             render = gestures.run(frame, screen)
             imshow("Hand Tracking", render)
-            if waitKey(10) & 0xFF == ord("q"):
-                break
-  

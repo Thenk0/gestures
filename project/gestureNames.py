@@ -20,10 +20,10 @@ class GestureNames:
         FIRSTLETTER,
         SECONDLETTER,
         THIRDLETTER,
-        CLICK,
         NOTHING,
+        CLICK,
         BACK,
-        SCROLL, 
+        SCROLL,
     ]
 
     gestureColors = {
@@ -41,14 +41,25 @@ class GestureNames:
 
     gestureActionsSingle = {
         NOTHING: GestureActions.cursor,
+        BACK: GestureActions.right_click,
+        CLICK: GestureActions.click
     }
 
     gestureActionsMultiple = {
-        f"{SCROLL}|{SCROLL}": GestureActions.scroll,
+        f"{NOTHING}|{NOTHING}": GestureActions.scroll,
+        f"{CLICK}|{SCROLL}": GestureActions.menuscroll,
         f"{FIRSTGROUP}|{NOTHING}": GestureActions.left_first_group,
         f"{SECONDGROUP}|{NOTHING}": GestureActions.left_second_group,
         f"{THIRDGROUP}|{NOTHING}": GestureActions.left_third_group,
         f"{NOTHING}|{FIRSTGROUP}": GestureActions.right_first_group,
         f"{NOTHING}|{SECONDGROUP}": GestureActions.right_second_group,
         f"{NOTHING}|{THIRDGROUP}": GestureActions.right_third_group,
+        f"{NOTHING}|{SCROLL}": GestureActions.space,
+        f"{SCROLL}|{NOTHING}": GestureActions.backspace,
+        f"{FIRSTGROUP}|{CLICK}": GestureActions.input_keyboard,
+        f"{SECONDGROUP}|{CLICK}": GestureActions.input_keyboard,
+        f"{THIRDGROUP}|{CLICK}": GestureActions.input_keyboard,
+        f"{CLICK}|{FIRSTGROUP}": GestureActions.input_keyboard,
+        f"{CLICK}|{SECONDGROUP}": GestureActions.input_keyboard,
+        f"{CLICK}|{THIRDGROUP}": GestureActions.input_keyboard,
     }
